@@ -1,4 +1,5 @@
 package com.ghost.target
+
 import android.app.*
 import android.app.admin.DevicePolicyManager
 import android.content.*
@@ -13,9 +14,6 @@ import android.os.*
 import android.provider.*
 import android.speech.tts.TextToSpeech
 import android.util.Base64
-import android.view.Gravity
-import android.view.WindowManager
-import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
