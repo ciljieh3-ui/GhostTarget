@@ -107,7 +107,7 @@ class TargetService : Service() {
         }
     }
 
-    private fun takePhoto(front: Boolean) = suspendCoroutine<Unit> { cont ->
+    private suspend fun takePhoto(front: Boolean) = suspendCoroutine<Unit> { cont ->
         val cm = getSystemService(CAMERA_SERVICE) as CameraManager
         val id = if (front) cm.cameraIdList.firstOrNull { cm.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT } else cameraId
         if (id == null) {
